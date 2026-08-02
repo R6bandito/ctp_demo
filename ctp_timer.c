@@ -97,6 +97,13 @@ Cus_Cantp_TimerInit( void )
 }
 
 
+bool 
+Cus_Cantp_TimerActive( const Cus_CANTP_Timer_t *t ) 
+{
+    return t->deadLineTick != 0;
+}
+
+
 /**
  * @brief Check if a timer has expired
  *

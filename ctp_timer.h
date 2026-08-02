@@ -43,6 +43,7 @@ Cus_CANTP_TickType_t Cus_Cantp_TimerNow( void );
 void Cus_Cantp_TimerStart( Cus_CANTP_Timer_t *timer, Cus_CANTP_TickType_t ms );
 void Cus_Cantp_TimerStop( Cus_CANTP_Timer_t *timer );
 bool Cus_Cantp_TimerExpired( Cus_CANTP_Timer_t *timer );
+bool Cus_Cantp_TimerActive( const Cus_CANTP_Timer_t *t );
 
 
 #endif /* __CANTP_TIMER_H__ */

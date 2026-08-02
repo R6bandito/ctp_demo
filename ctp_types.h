@@ -17,6 +17,40 @@
 #include <stddef.h>
 
 
+/*============================================================================
+ * Debug & Assert
+ *============================================================================*/
+/**
+ * @brief  CANTP library assertion macro.
+ *
+ * Checks condition `expr` at runtime.  On failure:
+ *   - Calls CUS_CANTP_ASSERT_HOOK() (user-overridable debug print).
+ *   - Triggers a debugger breakpoint (BKPT on Cortex-M).
+ *   - Enters an infinite loop.
+ *
+ * To provide a custom debug print, #define CUS_CANTP_ASSERT_HOOK(msg)
+ * before including this header.  The default hook is a no-op.
+ *
+ * Usage example with printf:
+ * @code
+ *   #define CUS_CANTP_ASSERT_HOOK(msg)  printf("[%s:%d] %s\n", __FILE__, __LINE__, msg)
+ *   #include "ctp_types.h"
+ * @endcode
+ */
+#ifndef CUS_CANTP_ASSERT_HOOK
+  #define CUS_CANTP_ASSERT_HOOK(msg)  ((void)0)
+#endif
+
+#define CUS_CANTP_ASSERT(expr)                                           \
+      do {                                                                   \
+          if (!(expr)) {                                                    \
+              CUS_CANTP_ASSERT_HOOK("CANTP ASSERT: " #expr);               \
+              __asm volatile ("bkpt 0");  /* ARM Cortex-M breakpoint */      \
+              for (;;) { __asm volatile ("nop"); }                           \
+          }                                                                  \
+      } while (0)
+
+
 /* Forward declarations for connection objects */
 typedef struct	Cus_CANTP_TxConn	Cus_CANTP_TxConn_t;		/**< Transmit connection context */
 typedef struct	Cus_CANTP_RxConn	Cus_CANTP_RxConn_t;		/**< Receive connection context */
@@ -83,6 +117,9 @@ typedef enum
 	/* CUS_CANTP_FLOW_WAIT = 1, */		/* NOT implemented! */
 	CUS_CANTP_FLOW_OVERFLOW = 2,
 
+	CUS_CANTP_FLOW_ACTIVITE,
+	CUS_CANTP_FLOW_NONE,
+
 } Cus_CANTP_FLOWState_t;
 
 
@@ -98,8 +135,8 @@ typedef enum
 typedef enum 
 {
 	CUS_CANTP_ADDR_MODE_NORMAL = 0,
-	/* TODO: CUS_CANTP_ADDR_MODE_EXT */
-	/* TODO: CUS_CANTP_ADDR_MODE_MIX */
+	CUS_CANTP_ADDR_MODE_EXT	   = 1,
+	/* CUS_CANTP_ADDR_MODE_MIX  NOT implemented! */
 
 } Cus_CANTP_AddrMode_t;
 
@@ -138,6 +175,45 @@ typedef enum
 	CUS_CANTP_PCI_UNKNOWN = 0xFF,
 
 } Cus_CANTP_PCIType_t;
+
+
+typedef enum 
+{
+	CUS_CANTP_SIZE_8  = 8,
+	CUS_CANTP_SIZE_12 = 12,
+	CUS_CANTP_SIZE_16 = 16,
+	CUS_CANTP_SIZE_20 = 20,
+	CUS_CANTP_SIZE_24 = 24,
+	CUS_CANTP_SIZE_32 = 32,
+	CUS_CANTP_SIZE_48 = 48,
+	CUS_CANTP_SIZE_64 = 64,
+
+} Cus_CANTP_FrameSize_t;
+
+
+typedef enum 
+{
+	CUS_CANTP_CONN_TYPE_TX,
+	CUS_CANTP_CONN_TYPE_RX,
+
+} Cus_CANTP_ConnType_t;
+
+
+/*============================================================================
+* Protocol Timing Constants (ISO 15765-2)
+*============================================================================*/
+#ifndef CUS_CANTP_TIMEOUT_N_AS
+	#define CUS_CANTP_TIMEOUT_N_AS   1000U   /* send confirmation timeout (ms) */
+#endif
+#ifndef CUS_CANTP_TIMEOUT_N_BS
+	#define CUS_CANTP_TIMEOUT_N_BS   5000U   /* wait for Flow Control (ms)     */
+#endif
+#ifndef CUS_CANTP_TIMEOUT_N_AR
+	#define CUS_CANTP_TIMEOUT_N_AR   1000U   /* FC send confirmation (ms)      */
+#endif
+#ifndef CUS_CANTP_TIMEOUT_N_CR
+	#define CUS_CANTP_TIMEOUT_N_CR   1000U   /* wait for Consecutive Frame (ms)*/
+#endif
 
 
 /*============================================================================

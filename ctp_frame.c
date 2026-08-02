@@ -1,3 +1,12 @@
+/**
+ * @file ctp_frame.c
+ * @brief CAN TP Frame Assembly & Parsing — Implementation
+ * @author R6bandito
+ * @date 2026-8
+ *
+ * ISO 15765-2 frame construction / deconstruction.
+ * All functions are stateless and operate purely on the supplied buffers.
+ */
 #include "ctp_frame.h"
 #include <string.h>
 
@@ -236,4 +245,3 @@ Cus_Cantp_ParseFC( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, u
 
 	return 1;
 }
-
