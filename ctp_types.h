@@ -75,7 +75,7 @@ typedef enum
 	/* ----- Receive side states ----- */
 	CUS_CANTP_STA_RX_SF,			/**< Receiving Single Frame (<= 8 bytes) */
 	CUS_CANTP_STA_RX_FF,			/**< Receiving First Frame (multi-frame start) */
-	CUS_CANTP_STA_RX_CF,			/**< Receiving Consecutive Frame (data continuation) */
+	CUS_CANTP_STA_RX_CF_COMPLETE,	/**< CF reception complete, MainFunction → DataInd */
 	CUS_CANTP_STA_RX_WAIT_CF,		/**< Waiting for next Consecutive Frame */
 	CUS_CANTP_STA_TX_FC,			/**< Transmitting Flow Control frame (receiver side) */
 
@@ -116,9 +116,6 @@ typedef enum
 	CUS_CANTP_FLOW_CTS = 0,
 	/* CUS_CANTP_FLOW_WAIT = 1, */		/* NOT implemented! */
 	CUS_CANTP_FLOW_OVERFLOW = 2,
-
-	CUS_CANTP_FLOW_ACTIVITE,
-	CUS_CANTP_FLOW_NONE,
 
 } Cus_CANTP_FLOWState_t;
 
@@ -222,13 +219,21 @@ typedef enum
 /**
  * @brief CAN frame transmission callback
  *
+ * Called by CANTP when a frame needs to be transmitted over CAN.
+ * The implementation must write the frame to a hardware mailbox or
+ * queue and return an opaque tag that identifies this transmission.
+ *
  * @param userCtx   User context (passed through from the connection)
  * @param canId     CAN identifier (11-bit or 29-bit)
  * @param data       Pointer to data buffer to send
- * @param dlc        Data length code (0-8)
- * @return uint8_t   !0 on success, 0 on failure
+ * @param dlc        Data length code
+ * @retval  -1       Transmit failed (mailbox full or hardware error)
+ * @retval >= 0      Opaque tag identifying this transmission (e.g.
+ *                   CAN mailbox number on STM32).  The same value is
+ *                   passed back via Cus_Cantp_TxConfirm() to match
+ *                   the completion event to this connection.
  */
-typedef uint8_t ( *Cus_Cantp_SendFunc_t )( void *userCtx, uint32_t canId, const uint8_t *data, uint8_t dlc );
+typedef int8_t ( *Cus_Cantp_SendFunc_t )( void *userCtx, uint32_t canId, const uint8_t *data, uint8_t dlc );
 
 
 /**

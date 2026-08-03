@@ -12,7 +12,7 @@
 
 
 uint8_t 
-Cus_Cantp_BuildSF( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const uint8_t *data, uint8_t len )
+Cus_Cantp_BuildSF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, const uint8_t *data, uint8_t len )
 {
 	if ( !frame || !data )
 		return 0;
@@ -53,7 +53,7 @@ Cus_Cantp_BuildSF( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const u
 
 
 uint8_t 
-Cus_Cantp_BuildFF( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const uint8_t *data, uint32_t totLen )
+Cus_Cantp_BuildFF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, const uint8_t *data, uint32_t totLen )
 {
 	if ( !frame || !data )
 		return 0;
@@ -82,7 +82,7 @@ Cus_Cantp_BuildFF( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const u
 
 
 uint8_t 
-Cus_Cantp_BuildCF( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const uint8_t *data, uint32_t remaining, uint8_t snCode, uint8_t *pCopyLen )
+Cus_Cantp_BuildCF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, const uint8_t *data, uint32_t remaining, uint8_t snCode, uint8_t *pCopyLen )
 {
 	if ( !frame || !data || !pCopyLen )
 		return 0;
@@ -109,7 +109,7 @@ Cus_Cantp_BuildCF( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const u
 
 
 uint8_t 
-Cus_Cantp_BuildFC( uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, uint8_t flowState, uint8_t bs, uint8_t stmin )
+Cus_Cantp_BuildFC( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, uint8_t flowState, uint8_t bs, uint8_t stmin )
 {
 	if ( !frame )
 		return 0;
@@ -152,7 +152,7 @@ Cus_Cantp_GetPciType( const uint8_t *frame, uint8_t pciOffset )
 
 
 uint8_t 
-Cus_Cantp_ParseSF( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const uint8_t **pData, uint8_t *pLen )
+Cus_Cantp_ParseSF( const uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, const uint8_t **pData, uint8_t *pLen )
 {
 	if ( !frame || !pData || !pLen )
 		return 0;
@@ -181,7 +181,7 @@ Cus_Cantp_ParseSF( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, c
 
 
 uint32_t 
-Cus_Cantp_ParseFF( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, const uint8_t **pData, uint8_t *pLen )
+Cus_Cantp_ParseFF( const uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, const uint8_t **pData, uint8_t *pLen )
 {
 	if ( !frame || !pData || !pLen )
 		return 0;
@@ -208,7 +208,7 @@ Cus_Cantp_ParseFF( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, c
 
 
 uint8_t 
-Cus_Cantp_ParseCF( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, uint8_t *pSN, const uint8_t **pData, uint8_t *pLen )
+Cus_Cantp_ParseCF( const uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, uint8_t *pSN, const uint8_t **pData, uint8_t *pLen )
 {
 	if ( !frame || !pSN || !pData || !pLen )
 		return 0;
@@ -229,7 +229,7 @@ Cus_Cantp_ParseCF( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, u
 
 
 uint8_t 
-Cus_Cantp_ParseFC( const uint8_t *frame, uint8_t frameSize, uint8_t pciOffset, uint8_t *pFlowState, uint8_t *pBS, uint8_t *pSTmin )
+Cus_Cantp_ParseFC( const uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, Cus_CANTP_FLOWState_t *pFlowState, uint8_t *pBS, uint8_t *pSTmin )
 {
 	if ( !frame || !pFlowState || !pBS || !pSTmin )
 		return 0;
