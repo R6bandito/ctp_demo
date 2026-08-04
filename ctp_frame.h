@@ -29,7 +29,7 @@ uint8_t Cus_Cantp_BuildCF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint
                            uint8_t snCode, uint8_t *pCopyLen );
 
 uint8_t Cus_Cantp_BuildFC( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset,
-                           uint8_t flowState, uint8_t bs, uint8_t stmin );
+                           Cus_CANTP_FLOWState_t flowState, uint8_t bs, uint8_t stmin );
 
 
 /*============================================================================

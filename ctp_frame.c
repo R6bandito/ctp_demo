@@ -109,7 +109,7 @@ Cus_Cantp_BuildCF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciO
 
 
 uint8_t 
-Cus_Cantp_BuildFC( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, uint8_t flowState, uint8_t bs, uint8_t stmin )
+Cus_Cantp_BuildFC( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset, Cus_CANTP_FLOWState_t flowState, uint8_t bs, uint8_t stmin )
 {
 	if ( !frame )
 		return 0;
@@ -237,7 +237,7 @@ Cus_Cantp_ParseFC( const uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_
 	(void)frameSize;
 
 	/* Get Flowstate. */
-	*pFlowState = frame[pciOffset] & 0x0F;
+	*pFlowState = (Cus_CANTP_FLOWState_t)(frame[pciOffset] & 0x0F);
 
 	/* Get BS & STmin. */
 	*pBS = frame[pciOffset + 1];

@@ -171,7 +171,7 @@ Cus_Cantp_FCHandler( Cus_CANTP_TxConn_t *tx, const uint8_t *data )
 	Cus_CANTP_FLOWState_t flowState;
 	uint8_t BS = 0;
 	uint8_t STmin = 0;
-	if ( !Cus_Cantp_ParseFC( data, 8, off, &flowState, &BS, &STmin ) )
+	if ( !Cus_Cantp_ParseFC( data, CUS_CANTP_SIZE_8, off, &flowState, &BS, &STmin ) )
 		return;
 
 	if ( flowState == CUS_CANTP_FLOW_OVERFLOW )
@@ -248,8 +248,11 @@ SendFC( Cus_CANTP_RxConn_t *rx, Cus_CANTP_FLOWState_t flow )
 
 	/* FC always classic CAN, 8 bytes */
 	uint8_t frame[CUS_CANTP_SIZE_8] = { 0 };
-	Cus_Cantp_WriteAddrPrefix( frame, &rx->channel );
-	uint8_t fs = Cus_Cantp_BuildFC( frame, 8, off, flow, rx->bs, rx->stmin );
+
+	if ( rx->channel.addrMode == CUS_CANTP_ADDR_MODE_EXT )
+		frame[0] = rx->peer_sa;   
+	
+	uint8_t fs = Cus_Cantp_BuildFC( frame, CUS_CANTP_SIZE_8, off, flow, rx->bs, rx->stmin );
 	if ( !fs )	
 		return false;
 
@@ -264,6 +267,7 @@ SendFC( Cus_CANTP_RxConn_t *rx, Cus_CANTP_FLOWState_t flow )
 	 * start the send-confirmation timer (N_Ar), and move to TX_FC.
 	 */
 	rx->fc_tag = (uint32_t)sret;
+	rx->bs_rem = rx->bs; 
 	Cus_Cantp_TimerStart( &rx->t_n_ar, CUS_CANTP_TIMEOUT_N_AR );
 	rx->state = CUS_CANTP_STA_TX_FC;
 
@@ -351,6 +355,7 @@ Cus_Cantp_StartTransmit( Cus_CANTP_TxConn_t *conn, const uint8_t *data, uint32_t
 	{
 		/* Single Frame suffices for this communication.  */
 		uint8_t dlc_hw = Cus_Cantp_SizeToLinkLayerDLC( (Cus_CANTP_FrameSize_t)fs );
+		conn->state = CUS_CANTP_STA_TX_SF;
 		int8_t sret = conn->send( conn->user_ctx, id, frame, dlc_hw );
 		if ( sret < 0 )
 			return -2;
@@ -358,7 +363,6 @@ Cus_Cantp_StartTransmit( Cus_CANTP_TxConn_t *conn, const uint8_t *data, uint32_t
 
 		conn->sn = 0;
 		conn->pos = len;
-		conn->state = CUS_CANTP_STA_TX_SF;
 	}
 	else
 	{
@@ -368,6 +372,7 @@ Cus_Cantp_StartTransmit( Cus_CANTP_TxConn_t *conn, const uint8_t *data, uint32_t
 
 		uint8_t dlc_hw = Cus_Cantp_SizeToLinkLayerDLC((Cus_CANTP_FrameSize_t)fs);
 
+		conn->state = CUS_CANTP_STA_TX_FF;
 		int8_t sret = conn->send( conn->user_ctx, id, frame, dlc_hw );
 		if ( sret < 0 )
 			return -2;
@@ -376,7 +381,6 @@ Cus_Cantp_StartTransmit( Cus_CANTP_TxConn_t *conn, const uint8_t *data, uint32_t
 		uint8_t ffPayload = conn->channel.fSize - offset - 2;   /* FF PCI = 2 bytes */
 		conn->pos = ffPayload;
 		conn->sn = 1;
-		conn->state = CUS_CANTP_STA_TX_FF;
 	}
 
 	conn->tot_len = len;
@@ -592,10 +596,11 @@ Cus_Cantp_MainFunction( void )
 			continue;
 		}
 
-		if ( (tx->state == CUS_CANTP_STA_TX_CF) && !Cus_Cantp_TimerActive( &tx->t_n_as ) && Cus_Cantp_TimerExpired( &tx->t_stmin ) )
+		if ( (tx->state == CUS_CANTP_STA_TX_CF) && !Cus_Cantp_TimerActive( &tx->t_n_as ) && (!Cus_Cantp_TimerActive( &tx->t_stmin ) || Cus_Cantp_TimerExpired( &tx->t_stmin )) )
 		{
 			while( SendNextCF( tx ) )
 			{
+				if ( Cus_Cantp_TimerActive( &tx->t_n_as ) ) break;
 				if ( tx->pos == tx->tot_len )	break;
 				if ( (tx->bs > 0) && (tx->bs_rem == 0) )	break;
 				if ( (tx->stmin > 0) && Cus_Cantp_TimerActive( &tx->t_stmin ) )  break;

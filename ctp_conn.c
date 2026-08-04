@@ -358,3 +358,17 @@ Cus_Cantp_FindRxById( uint32_t canId, uint8_t *frame )
 
 	return NULL;
 }
+
+
+Cus_CANTP_TxConn_t *
+Cus_Cantp_GetTxConn( uint8_t index )
+{
+	return (index < CUS_CANTP_MAX_TX) ? &txPool[index] : NULL;
+}
+
+
+Cus_CANTP_RxConn_t *
+Cus_Cantp_GetRxConn( uint8_t index )
+{
+	return (index < CUS_CANTP_MAX_RX) ? &rxPool[index] : NULL;
+}

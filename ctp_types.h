@@ -259,3 +259,5 @@ typedef void ( *Cus_Cantp_ErrCb_t )( void *conn, Cus_CANTP_ErrCode_t err );
 
 
 #endif /* __CANTP_TYPES_H__ */
+
+
