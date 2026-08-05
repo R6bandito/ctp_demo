@@ -174,6 +174,13 @@ typedef enum
 } Cus_CANTP_PCIType_t;
 
 
+/**
+ * @brief CAN TP frame sizes (classic CAN and CAN FD)
+ *
+ * Defines the byte-length values that a CAN frame can carry,
+ * covering both classic CAN (8 bytes) and CAN FD (12–64 bytes).
+ * Used in channel configuration and DLC ↔ frame-size conversion.
+ */
 typedef enum 
 {
 	CUS_CANTP_SIZE_8  = 8,
@@ -188,6 +195,12 @@ typedef enum
 } Cus_CANTP_FrameSize_t;
 
 
+/**
+ * @brief Connection type discriminator
+ *
+ * Used by Cus_Cantp_ReleaseConn() to determine which pool
+ * (TxPool or RxPool) the connection belongs to.
+ */
 typedef enum 
 {
 	CUS_CANTP_CONN_TYPE_TX,

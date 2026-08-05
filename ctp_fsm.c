@@ -1,3 +1,20 @@
+/**
+ * @file ctp_fsm.c
+ * @brief CAN TP Finite State Machine — Implementation
+ * @author R6bandito
+ * @date 2026-8
+ *
+ * Core protocol engine.  Handles:
+ *   - StartTransmit   (SF / FF dispatching)
+ *   - FeedFrame       (ISR frame routing → SF/FF/CF/FC handlers)
+ *   - TxConfirm       (ISR TX-completion → state advancement)
+ *   - MainFunction    (Task-level timer expiry, STmin, deferred FC, callbacks)
+ *   - SendNextCF      (CF construction and submission)
+ *   - SendFC          (Flow Control frame construction and submission)
+ *
+ * No user callbacks are invoked from ISR context.
+ * All DataInd / ErrCb calls are deferred to MainFunction.
+ */
 #include "ctp_fsm.h"
 #include <string.h>
 
@@ -663,5 +680,4 @@ Cus_Cantp_MainFunction( void )
 		}
 	}
 }
-
 
