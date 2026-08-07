@@ -33,6 +33,53 @@ static void RxConnResetRx( Cus_CANTP_RxConn_t *rx );
 
 extern Cus_CANTP_TxConn_t *Cus_Cantp_GetTxConn( uint8_t index );
 extern Cus_CANTP_RxConn_t *Cus_Cantp_GetRxConn( uint8_t index );
+
+/*============================================================================
+ * OS Critical-Section Stubs (weak — overridden by RTOS port)
+ *============================================================================*/
+#ifndef __weak
+	#if defined(__GNUC__) || defined(__clang__)
+		#define __weak  __attribute__((weak))
+	#elif defined(__CC_ARM)
+		#define __weak  __weak
+	#endif
+#endif
+
+__weak void Cus_Cantp_OS_EnterCritical(void) {}
+__weak void Cus_Cantp_OS_ExitCritical(void) {}
+
+
+/*============================================================================
+ * Deferred-Callback Helpers
+ * Error / completion detected in Phase 1 (critical section) → set cb_pending.
+ * The actual callback is dispatched in Phase 2 (outside critical section).
+ *============================================================================*/
+
+/**
+ * @brief  Record a Tx connection error for deferred callback.
+ *         Resets transient fields and returns the slot to IDLE.
+ */
+static void 
+TxConnFlagError( Cus_CANTP_TxConn_t *tx, Cus_CANTP_ErrCode_t err )
+{
+	tx->cb_pending  = 1;
+	tx->cb_err_code = (uint8_t)err;
+	tx->state       = CUS_CANTP_STA_IDLE;
+	TxConnResetTx(tx);
+}
+
+/**
+ * @brief  Record an Rx connection error for deferred callback.
+ *         Resets transient fields and returns the slot to IDLE.
+ */
+static void 
+RxConnFlagError( Cus_CANTP_RxConn_t *rx, Cus_CANTP_ErrCode_t err )
+{
+	rx->cb_pending  = 1;    /* bit0 = err pending */
+	rx->cb_err_code = (uint8_t)err;
+	RxConnResetRx(rx);
+	rx->state = CUS_CANTP_STA_IDLE;
+}
 /* ******************************************************************************************** */
 
 
@@ -348,6 +395,7 @@ static void RxConnResetRx( Cus_CANTP_RxConn_t *rx )
  * @retval -1  connection busy (state != IDLE)
  * @retval -2  SendFunc failed (no mailbox available, try again later)
  * @retval -3  channel configuration invalid (address out of range)
+ * @retval -4  the Functional TAType is not support FF frame.
  */
 int8_t 
 Cus_Cantp_StartTransmit( Cus_CANTP_TxConn_t *conn, const uint8_t *data, uint32_t len )
@@ -383,6 +431,13 @@ Cus_Cantp_StartTransmit( Cus_CANTP_TxConn_t *conn, const uint8_t *data, uint32_t
 	}
 	else
 	{
+		if ( conn->channel.TAType == CUS_CANTP_TA_TYPE_FUNCTIONAL )
+		{
+			/* Functional addressing supports Single Frame only. 
+			   Multi-frame (FF/CF) is not allowed. */
+			return -4;
+		}
+
 		/* SF doesn't fit — go First Frame. */
 		fs = Cus_Cantp_BuildFF( frame, conn->channel.fSize, offset, data, len );
 		CUS_CANTP_ASSERT( fs != 0 );
@@ -478,7 +533,7 @@ Cus_Cantp_TxConfirm( void *bind_dev, uint32_t tag )
 
 	/* Then, try RxConn.(FC frame was sent, waiting for confirmation) */
 	Cus_CANTP_RxConn_t *rx = Cus_Cantp_FindRxByTag( bind_dev, tag );
-	if ( rx && rx->state == CUS_CANTP_STA_TX_FC && rx->fc_tag )
+	if ( rx && rx->state == CUS_CANTP_STA_TX_FC )
 	{
 		/* Find relevant connection. */
 		Cus_Cantp_TimerStop( &rx->t_n_ar );
@@ -542,6 +597,32 @@ Cus_Cantp_FeedFrame( uint32_t canId, const uint8_t *data, uint8_t dlc )
 			default:	break;
 		}
 	}
+	else 
+	{
+		/* ── RxConn: Functional broadcast ──
+		* No physical match → this may be a functional frame.
+		* Scan all RxConns; dispatch SF to every conn whose funcId matches.
+		* FF / CF on functional are silently dropped (ISO 15765-2: SF only). */
+		for ( uint8_t i = 0; i < CUS_CANTP_MAX_RX; i++ )
+		{
+			Cus_CANTP_RxConn_t *frx = Cus_Cantp_GetRxConn( i );
+			if ( frx->index == -1 )
+				continue;
+
+			/* Match: functional addressing + same funcId */
+			if ( frx->channel.TAType != CUS_CANTP_TA_TYPE_FUNCTIONAL )
+				continue;
+			if ( frx->channel.funcId != canId )
+				continue;
+
+			uint8_t foff = Cus_Cantp_GetPciOffset( frx->channel.addrMode );
+			Cus_CANTP_PCIType_t ftype = Cus_Cantp_GetPciType( data, foff );
+
+			if ( ftype == CUS_CANTP_PCI_SF )
+				Cus_Cantp_SFHandler( frx, data, fs );
+			/* else: FF / CF / FC on functional — discard */
+		}
+	}
 
 	/* ── TxConn: FC ── */
 	/* Route to TxConn waiting for FC */
@@ -574,87 +655,81 @@ Cus_Cantp_FeedFrame( uint32_t canId, const uint8_t *data, uint8_t dlc )
 void 
 Cus_Cantp_MainFunction( void )
 {
+	/* =================================================================
+	 * Phase 1 — Critical section
+	 *   - Timer expiry   → flag error (cb_pending), reset connection
+	 *   - STmin / CF     → SendNextCF (mailbox write only)
+	 *   - fc_pending     → SendFC (mailbox write only)
+	 *   - Rx completion  → flag DataInd (cb_pending)
+	 * No user callbacks are invoked inside the critical section.
+	 * ================================================================= */
+	Cus_Cantp_OS_EnterCritical();
+
 	/* ── TxConn Pool ── */
-	for( uint8_t index = 0; index < CUS_CANTP_MAX_TX; index++ )
+	for ( uint8_t index = 0; index < CUS_CANTP_MAX_TX; index++ )
 	{
 		Cus_CANTP_TxConn_t *tx = Cus_Cantp_GetTxConn( index );
 		if ( tx->index == -1 )
 			continue;
 
+		/* N_Bs timeout — peer did not send FC in time */
 		if ( Cus_Cantp_TimerExpired( &tx->t_n_bs ) && tx->state == CUS_CANTP_STA_TX_WAIT_FC )
 		{
-			/* N_Bs timeout (FC not received). Notify user and terminate the transmission. */
-			if ( tx->err )
-				tx->err( (void *)tx, CUS_CANTP_ERR_NBS_TIMEOUT );
-			
-			tx->state = CUS_CANTP_STA_IDLE;
-			TxConnResetTx( tx );
+			TxConnFlagError( tx, CUS_CANTP_ERR_NBS_TIMEOUT );
 			continue;
 		}
 
+		/* N_As timeout — hardware did not confirm the last TX */
 		if ( Cus_Cantp_TimerExpired( &tx->t_n_as ) && Cus_Cantp_TimerActive( &tx->t_n_as ) )
 		{
-			/* Tx confirmation timeout. Notify the user and reset the connection. */
-			if ( tx->err )
-				tx->err( (void *)tx, CUS_CANTP_ERR_NAS_TIMEOUT );
-
-			tx->state = CUS_CANTP_STA_IDLE;
-			TxConnResetTx( tx );
+			TxConnFlagError( tx, CUS_CANTP_ERR_NAS_TIMEOUT );
 			continue;
 		}
 
+		/* Overflow during multi-frame transfer (peer sent OVERFLOW FC) */
 		if ( (tx->state == CUS_CANTP_STA_IDLE) && (tx->tot_len > 0) && (tx->pos != tx->tot_len) )
 		{
-			/* Receive Overflow during transfer. */
-			if ( tx->err )
-				tx->err( (void *)tx, CUS_CANTP_ERR_FLOW_OVFLW );
-
-			TxConnResetTx( tx );
+			TxConnFlagError( tx, CUS_CANTP_ERR_FLOW_OVFLW );
 			continue;
 		}
 
-		if ( (tx->state == CUS_CANTP_STA_TX_CF) && !Cus_Cantp_TimerActive( &tx->t_n_as ) && (!Cus_Cantp_TimerActive( &tx->t_stmin ) || Cus_Cantp_TimerExpired( &tx->t_stmin )) )
+		/* STmin-gated consecutive frame transmission */
+		if ( (tx->state == CUS_CANTP_STA_TX_CF) 
+				&& !Cus_Cantp_TimerActive( &tx->t_n_as ) 
+				&& ( !Cus_Cantp_TimerActive( &tx->t_stmin ) || Cus_Cantp_TimerExpired( &tx->t_stmin ) ) )
 		{
-			while( SendNextCF( tx ) )
+			while ( SendNextCF( tx ) )
 			{
-				if ( Cus_Cantp_TimerActive( &tx->t_n_as ) ) break;
-				if ( tx->pos == tx->tot_len )	break;
-				if ( (tx->bs > 0) && (tx->bs_rem == 0) )	break;
-				if ( (tx->stmin > 0) && Cus_Cantp_TimerActive( &tx->t_stmin ) )  break;
+				if ( Cus_Cantp_TimerActive( &tx->t_n_as ) )		break;
+				if ( tx->pos == tx->tot_len )					break;
+				if ( (tx->bs > 0) && (tx->bs_rem == 0) )		break;
+				if ( (tx->stmin > 0) && Cus_Cantp_TimerActive( &tx->t_stmin ) )	break;
 			}
 		}
 	}
 
 	/* ── RxConn Pool ── */
-	for( uint8_t index = 0; index < CUS_CANTP_MAX_RX; index++ )
+	for ( uint8_t index = 0; index < CUS_CANTP_MAX_RX; index++ )
 	{
 		Cus_CANTP_RxConn_t *rx = Cus_Cantp_GetRxConn( index );
 		if ( rx->index == -1 )
 			continue;
-		
+
+		/* N_Ar timeout — FC frame TX was not confirmed */
 		if ( Cus_Cantp_TimerExpired( &rx->t_n_ar ) && (rx->state == CUS_CANTP_STA_TX_FC) )
 		{
-			/* Flow control frame transmission confirmation timeout. */
-			if ( rx->err )
-				rx->err( (void *)rx,  CUS_CANTP_ERR_NAS_TIMEOUT );
-
-			RxConnResetRx( rx );
-			rx->state = CUS_CANTP_STA_IDLE;
+			RxConnFlagError( rx, CUS_CANTP_ERR_NAS_TIMEOUT );
 			continue;
 		}
 
+		/* N_Cr timeout — peer stopped sending CFs */
 		if ( Cus_Cantp_TimerExpired( &rx->t_n_cr ) && (rx->state == CUS_CANTP_STA_RX_WAIT_CF) )
 		{
-			/* Timeout waiting for Consecutive Frame. */
-			if ( rx->err )
-				rx->err( (void *)rx, CUS_CANTP_ERR_NCR_TIMEOUT );
-
-			RxConnResetRx( rx );
-			rx->state = CUS_CANTP_STA_IDLE;
+			RxConnFlagError( rx, CUS_CANTP_ERR_NCR_TIMEOUT );
 			continue;
 		}
 
-		/* Check the fc_pending flag and send the Flow Control frame if set. */
+		/* Deferred Flow Control frame */
 		if ( rx->fc_pending )
 		{
 			if ( (rx->state == CUS_CANTP_STA_RX_FF) || (rx->state == CUS_CANTP_STA_RX_WAIT_CF) )
@@ -665,12 +740,58 @@ Cus_Cantp_MainFunction( void )
 			{
 				SendFC( rx, CUS_CANTP_FLOW_OVERFLOW );
 			}
-
 			rx->fc_pending = 0;
 		}
 
-		/* Multiframe Receive OK! */
+		/* Multi-frame or single-frame receive complete — flag DataInd for Phase 2 */
 		if ( (rx->state == CUS_CANTP_STA_RX_CF_COMPLETE) || (rx->state == CUS_CANTP_STA_RX_SF) )
+		{
+			rx->cb_pending = 2;    /* bit1 = DataInd pending */
+		}
+	}
+
+	Cus_Cantp_OS_ExitCritical();
+
+	/* =================================================================
+	 * Phase 2 — User callbacks (outside critical section)
+	 *   - err()      for all connections flagged in Phase 1
+	 *   - data_ind() for Rx connections with completed reassembly
+	 * ================================================================= */
+
+	/* ── TxConn: error callbacks ── */
+	for ( uint8_t index = 0; index < CUS_CANTP_MAX_TX; index++ )
+	{
+		Cus_CANTP_TxConn_t *tx = Cus_Cantp_GetTxConn( index );
+		if ( tx->index == -1 )
+			continue;
+		if ( !tx->cb_pending )
+			continue;
+
+		if ( tx->err )
+			tx->err( (void *)tx, (Cus_CANTP_ErrCode_t)tx->cb_err_code );
+
+		tx->cb_pending  = 0;
+		tx->cb_err_code = 0;
+	}
+
+	/* ── RxConn: error & DataInd callbacks ── */
+	for ( uint8_t index = 0; index < CUS_CANTP_MAX_RX; index++ )
+	{
+		Cus_CANTP_RxConn_t *rx = Cus_Cantp_GetRxConn( index );
+		if ( rx->index == -1 )
+			continue;
+		if ( !rx->cb_pending )
+			continue;
+
+		/* bit0: error callback */
+		if ( rx->cb_pending & 1 )
+		{
+			if ( rx->err )
+				rx->err( (void *)rx, (Cus_CANTP_ErrCode_t)rx->cb_err_code );
+		}
+
+		/* bit1: DataInd callback (reassembly complete) */
+		if ( rx->cb_pending & 2 )
 		{
 			if ( rx->data_ind )
 				rx->data_ind( (void *)rx, rx->recv_buf, rx->tot_len );
@@ -678,6 +799,9 @@ Cus_Cantp_MainFunction( void )
 			RxConnResetRx( rx );
 			rx->state = CUS_CANTP_STA_IDLE;
 		}
+
+		rx->cb_pending  = 0;
+		rx->cb_err_code = 0;
 	}
 }
 

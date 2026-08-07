@@ -44,9 +44,11 @@ AllocTxConn( void )
 		if ( txPool[index].index == -1 && txPool[index].state == CUS_CANTP_STA_IDLE )
 		{
 			/* Find the freeslots. Return with the relevant Addr. */
-			memset(&txPool[index], 0, sizeof(txPool[index]));
 			freeSlots = index;
-			txPool[freeSlots].index = freeSlots;
+			txPool[freeSlots].index = freeSlots;   /* mark in-use before zeroing
+			                                            to avoid ISR false match */
+			memset(&txPool[index], 0, sizeof(txPool[index]));
+			txPool[freeSlots].index = freeSlots;   /* restore after memset */
 			return &txPool[freeSlots];
 		}
 	}
@@ -66,9 +68,11 @@ AllocRxConn( void )
 		if ( rxPool[index].index == -1 && rxPool[index].state == CUS_CANTP_STA_IDLE )
 		{
 			/* Find the freeslots. Return with the relevant Addr. */
-			memset(&rxPool[index], 0, sizeof(rxPool[index]));
 			freeSlots = index;
-			rxPool[freeSlots].index = freeSlots;
+			rxPool[freeSlots].index = freeSlots;   /* mark in-use before zeroing
+			                                            to avoid ISR false match */
+			memset(&rxPool[index], 0, sizeof(rxPool[index]));
+			rxPool[freeSlots].index = freeSlots;   /* restore after memset */
 			return &rxPool[freeSlots];
 		}
 	}

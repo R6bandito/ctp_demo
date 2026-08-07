@@ -63,6 +63,10 @@ struct Cus_CANTP_TxConn
     Cus_Cantp_SendFunc_t    send;       /* CAN frame transmit                 */
     Cus_Cantp_ErrCb_t       err;        /* error notification                 */
 
+    /* ---- Deferred callback (Phase 1 sets flags, Phase 2 dispatches) ---- */
+    uint8_t                 cb_pending;  /* bit0: error callback is pending    */
+    uint8_t                 cb_err_code; /* cached error code for Phase 2      */
+
     /*
      * Platform adapter fields — NOT interpreted by CANTP.
      * Set by the application during connection creation or inside callbacks.
@@ -118,6 +122,10 @@ struct Cus_CANTP_RxConn
     Cus_Cantp_SendFunc_t    send;       /* for sending Flow Control frames    */
     Cus_Cantp_DataInd_t     data_ind;   /* reassembly complete notification   */
     Cus_Cantp_ErrCb_t       err;        /* error notification                 */
+
+    /* ---- Deferred callback (Phase 1 sets flags, Phase 2 dispatches) ---- */
+    uint8_t                 cb_pending;  /* bit0: err, bit1: DataInd pending   */
+    uint8_t                 cb_err_code; /* cached error code for err callback */
 
     /*
      * Platform adapter fields — see TxConn for detailed explanation.
