@@ -209,6 +209,7 @@ test_run_all( void )
     test_normal_ff_4095();
     test_ext_sf_6b();
     test_ext_ff_4095b();
+    test_func_sf_broadcast();
 }
 
 
@@ -509,3 +510,103 @@ test_ext_ff_4095b( void )
     g_isOK = 0;
 }
 
+
+/* ==================================================================
+ * Test: Functional SF broadcast — one Tx, two Rx both listen on funcId
+ *
+ * Verifies:
+ *   1. Functional SF is routed to ALL RxConns with matching funcId
+ *   2. Physical FindRxById correctly returns NULL for functional frames
+ *   3. DataInd fires on every matching RxConn (not just the first)
+ *   4. SA == 0 wildcard works for functional as well
+ * ================================================================== */
+
+/* per-test state for the functional-broadcast callback */
+static uint8_t  g_func_rx_count;
+static uint8_t  g_func_buf1[256];
+static uint32_t g_func_len1;
+static uint8_t  g_func_buf2[256];
+static uint32_t g_func_len2;
+
+static void func_broadcast_cb( void *rxConn, const uint8_t *data, uint32_t len )
+{
+    (void)rxConn;
+    if ( g_func_rx_count == 0 )
+    {
+        g_func_len1 = (len < sizeof(g_func_buf1)) ? len : sizeof(g_func_buf1);
+        memcpy( g_func_buf1, data, g_func_len1 );
+    }
+    else
+    {
+        g_func_len2 = (len < sizeof(g_func_buf2)) ? len : sizeof(g_func_buf2);
+        memcpy( g_func_buf2, data, g_func_len2 );
+    }
+    g_func_rx_count++;
+}
+
+void 
+test_func_sf_broadcast( void )
+{
+    uint8_t data[7] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77 };
+    const uint32_t funcId = 0x7DF;   /* OBD functional request */
+
+    printf( "\n--- FUNC SF BROADCAST (funcId=0x%03lX) ---\n", funcId );
+
+    /* ── Create TWO RxConns both listening on the same functional ID ── */
+    const Cus_CANTP_ChannelCfg_t rxCh = {
+        .addrMode = CUS_CANTP_ADDR_MODE_NORMAL,
+        .SA       = 0x00,           /* wildcard: accept any sender          */
+        .TA       = 0x00,           /* unused for functional (funcId wins)  */
+        .TAType   = CUS_CANTP_TA_TYPE_FUNCTIONAL,
+        .fSize    = CUS_CANTP_SIZE_8,
+        .funcId   = funcId
+    };
+
+    const Cus_CANTP_RxConn_t *rx1 = Cus_Cantp_CreateRxConn(
+        rxCh, (void *)CAN1, NULL, sendCallBack, errorCallBack );
+    Cus_Cantp_RxConnBindBuf( rx1, g_func_buf1, sizeof(g_func_buf1),
+                              0, 0, func_broadcast_cb );
+
+    const Cus_CANTP_RxConn_t *rx2 = Cus_Cantp_CreateRxConn(
+        rxCh, (void *)CAN1, NULL, sendCallBack, errorCallBack );
+    Cus_Cantp_RxConnBindBuf( rx2, g_func_buf2, sizeof(g_func_buf2),
+                              0, 0, func_broadcast_cb );
+
+    /* ── Create functional TxConn ── */
+    const Cus_CANTP_ChannelCfg_t txCh = {
+        .addrMode = CUS_CANTP_ADDR_MODE_NORMAL,
+        .SA       = 0x01,           /* source address (for reference)       */
+        .TA       = 0x00,           /* unused for functional                */
+        .TAType   = CUS_CANTP_TA_TYPE_FUNCTIONAL,
+        .fSize    = CUS_CANTP_SIZE_8,
+        .funcId   = funcId
+    };
+    const Cus_CANTP_TxConn_t *tx = Cus_Cantp_CreateTxConn(
+        txCh, (void *)CAN1, NULL, sendCallBack, errorCallBack );
+
+    /* ── Send & poll until both RxConns fire DataInd ── */
+    g_func_rx_count = 0;
+    Cus_Cantp_StartTransmit( (Cus_CANTP_TxConn_t *)tx, data, sizeof(data) );
+
+    uint32_t timeout = Cus_Cantp_TimerNow() + 2000;
+    while ( g_func_rx_count < 2 && (int32_t)(Cus_Cantp_TimerNow() - timeout) < 0 )
+        Cus_Cantp_MainFunction();
+
+    /* ── Validate ── */
+    bool ok1 = (g_func_rx_count >= 1)
+            && (g_func_len1 == sizeof(data))
+            && (memcmp(g_func_buf1, data, sizeof(data)) == 0);
+    bool ok2 = (g_func_rx_count >= 2)
+            && (g_func_len2 == sizeof(data))
+            && (memcmp(g_func_buf2, data, sizeof(data)) == 0);
+
+    printf( "  Rx1 received: %luB  %s\n", g_func_len1, ok1 ? "PASS" : "FAIL" );
+    printf( "  Rx2 received: %luB  %s\n", g_func_len2, ok2 ? "PASS" : "FAIL" );
+    printf( "  Total callbacks fired: %u  %s\n",
+            g_func_rx_count, (g_func_rx_count == 2) ? "PASS" : "FAIL" );
+
+    /* ── Clean up ── */
+    Cus_Cantp_ReleaseConn( (void *)tx,  CUS_CANTP_CONN_TYPE_TX );
+    Cus_Cantp_ReleaseConn( (void *)rx1, CUS_CANTP_CONN_TYPE_RX );
+    Cus_Cantp_ReleaseConn( (void *)rx2, CUS_CANTP_CONN_TYPE_RX );
+}

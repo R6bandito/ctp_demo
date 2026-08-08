@@ -1,3 +1,34 @@
+/**
+ * @file    ctp_os.h
+ * @brief   CAN TP OS Abstraction Layer — Public API & Request Types
+ * @author  R6bandito
+ * @date    2026-08
+ *
+ * Declares the OS-agnostic primitives (thread, mailbox, delay, critical
+ * section) that the CAN TP protocol stack requires for multi-threaded
+ * operation, plus the synchronous OS-safe wrappers that serialise all
+ * protocol-stack access through a single kernel thread.
+ *
+ * @note   The @c #if(1) guard unconditionally enables the OS layer.
+ *         For bare-metal builds, exclude @ref ctp_os.c and
+ *         @ref ctp_os_port_freertos.c from compilation; the stack then
+ *         uses @c __weak empty critical-section stubs in @ref ctp_fsm.c
+ *         and the caller drives @ref Cus_Cantp_MainFunction directly.
+ *
+ * Threading model:
+ *
+ *   ┌─────────────┐   Mailbox    ┌──────────────┐
+ *   │ Caller tasks │──────Req───→│ Kernel thread │──→ Protocol stack (single writer)
+ *   └─────────────┘              └──────────────┘
+ *
+ *   - SEND:        fire-and-forget (result via error callback).
+ *   - CREATE_RX/TX: synchronous — blocking wait with @c p_done flag.
+ *   - RELEASE:      synchronous.
+ *
+ * Porting to a different RTOS requires implementing the seven functions
+ * declared with @c extern (thread, mailbox ×4, delay, enter/exit critical).
+ */
+
 #ifndef __CANTP_OS_H__
 #define __CANTP_OS_H__
 

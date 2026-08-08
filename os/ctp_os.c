@@ -1,5 +1,40 @@
-#include "ctp_os.h"
+/**
+ * @file    ctp_os.c
+ * @brief   CAN TP OS Abstraction Layer — Kernel Thread & Sync Wrappers
+ * @author  R6bandito
+ * @date    2026-08
+ *
+ * Implements the single kernel thread that serialises all protocol-stack
+ * access and the public OS-safe API wrappers that submit requests to it.
+ *
+ * Kernel thread loop:
+ *
+ *   1. Block on mailbox until a request arrives (1 ms polling with
+ *      MainFunction in between so timers stay alive).
+ *   2. Process the fetched request, then drain any additional requests
+ *      already queued (non-blocking fetch).
+ *   3. The connection pool, FSM state, and timers are only touched from
+ *      this thread — never from sender tasks or ISRs.
+ *
+ * Synchronous wrappers (CreateRxConn, CreateTxConn, ReleaseConn):
+ *
+ *   - Fill a @ref Cus_Cantp_OSReq_t with a stack-local @c p_done flag.
+ *   - Submit to mailbox via @ref __submit_and_wait.
+ *   - Poll @c *p_done with 1 ms delay until the kernel thread sets it,
+ *     or the caller-specified timeout expires.
+ *
+ * Fire-and-forget wrapper (StartTransmit):
+ *
+ *   - Submit to mailbox without a completion flag; result is delivered
+ *     asynchronously through the connection's error callback.
+ *
+ * @note   MUST be excluded from bare-metal builds together with the
+ *         RTOS port file.  When compiled without a running scheduler
+ *         the kernel thread never executes and all synchronous wrappers
+ *         time out.
+ */
 
+#include "ctp_os.h"
 
 
 #if defined(CUS_CANTP_OS)
@@ -33,7 +68,14 @@ __cantp_kernel_thread( void *parameter )
 
 	while (1)
 	{
-		while ( Cus_Cantp_OS_MailboxFetch( pMailBox, &Req, mbTimeout_noBlock ) == 0 )
+		/* Block until at least one request arrives. */
+		while ( Cus_Cantp_OS_MailboxFetch( pMailBox, &Req, 1u ) != 0 )
+		{
+			Cus_Cantp_MainFunction();
+		}
+
+		/* Process the fetched request plus any others already queued. */
+		do
 		{
 			switch ( Req.type )
 			{
@@ -81,11 +123,8 @@ __cantp_kernel_thread( void *parameter )
 			}
 
 			Cus_Cantp_MainFunction();
-		}
 
-		Cus_Cantp_MainFunction();
-
-		Cus_Cantp_OS_MailboxFetch( pMailBox, &Req, 1u );
+		} while ( Cus_Cantp_OS_MailboxFetch( pMailBox, &Req, mbTimeout_noBlock ) == 0 );
 	}
 }
 
@@ -184,7 +223,8 @@ Cus_Cantp_OS_CreateTxConn(
 
 	volatile uint8_t flag = 0;
 
-	Cus_Cantp_OSReq_t Req = {
+	Cus_Cantp_OSReq_t Req = 
+	{
 		.type   = CUS_CANTP_REQ_CREATE_TX,
 		.p_done = (volatile uint8_t *)&flag,
 		.u      = { .create_tx = {

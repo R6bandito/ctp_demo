@@ -45,8 +45,8 @@ extern Cus_CANTP_RxConn_t *Cus_Cantp_GetRxConn( uint8_t index );
 	#endif
 #endif
 
-__weak void Cus_Cantp_OS_EnterCritical(void) {}
-__weak void Cus_Cantp_OS_ExitCritical(void) {}
+__weak void Cus_Cantp_OS_EnterCritical(void) {  __disable_irq(); }
+__weak void Cus_Cantp_OS_ExitCritical(void) { __enable_irq(); }
 
 
 /*============================================================================

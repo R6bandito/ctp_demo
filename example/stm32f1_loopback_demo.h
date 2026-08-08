@@ -27,7 +27,7 @@ void test_normal_ff_35b_bs2( void );
 void test_normal_ff_4095( void );
 void test_ext_ff_4095b( void );
 void test_ext_sf_6b( void );
+void test_func_sf_broadcast( void );
 /* ********************************* */
 
 #endif /* __STM32F1_LOOP_H__ */
-
