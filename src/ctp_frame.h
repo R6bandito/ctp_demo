@@ -19,7 +19,7 @@
  * Build — CANTP → raw 8‑byte / FD frame
  *============================================================================*/
 uint8_t Cus_Cantp_BuildSF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset,
-                           const uint8_t *data, uint8_t len );
+                           const uint8_t *data, uint32_t len );
 
 uint8_t Cus_Cantp_BuildFF( uint8_t *frame, Cus_CANTP_FrameSize_t frameSize, uint8_t pciOffset,
                            const uint8_t *data, uint32_t totLen );

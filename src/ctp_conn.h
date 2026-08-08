@@ -21,11 +21,11 @@
  * Pool Sizing (user-overridable)
  *============================================================================*/
 #ifndef CUS_CANTP_MAX_TX
-	#define CUS_CANTP_MAX_TX		(2)
+	#define CUS_CANTP_MAX_TX		(4)
 #endif
 
 #ifndef CUS_CANTP_MAX_RX
-	#define CUS_CANTP_MAX_RX		(2)
+	#define CUS_CANTP_MAX_RX		(4)
 #endif
 
 

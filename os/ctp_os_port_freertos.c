@@ -69,9 +69,13 @@ Cus_Cantp_OS_MailboxSend( void *mailBox, const void *item, uint32_t timeoutMs )
 
 
 int8_t 
-Cus_Cantp_OS_MailboxFetch( void *mailBox, void *item, uint32_t timeoutMs )
+Cus_Cantp_OS_MailboxFetch( void *mailBox, void *item, uint32_t timeoutTicks )
 {
-	TickType_t ticks = (timeoutMs == 0xFFFFFFFF) ? portMAX_DELAY: pdMS_TO_TICKS( timeoutMs );
+	/* NOTE: internal use only (kernel thread).  The timeout is interpreted
+	 * directly in ticks, NOT milliseconds — the kernel thread's MainFunction
+	 * driving period therefore scales with configTICK_RATE_HZ: raising the
+	 * tick rate compresses the CF frame interval. */
+	TickType_t ticks = (timeoutTicks == 0xFFFFFFFF) ? portMAX_DELAY: (TickType_t)timeoutTicks;
 	BaseType_t Return = xQueueReceive( (QueueHandle_t)mailBox, item, ticks );
 	if ( Return != pdTRUE )
 		return -1;

@@ -15,6 +15,7 @@
 - **双物理层**：支持 Classic CAN（8 字节）/ CAN FD（12~64 字节）.
 - **完整的流控**：实现BS 块大小、STmin 帧间隔、OVERFLOW 中止.
 - **可移植**：协议栈内部解耦具体硬件操作，纯C代码，可移植多种类型MCU.
+- **RTOS 支持**：根据具体RTOS实现几个必须接口 整个协议栈即可运行于 OS 环境.
 
 ---
 
@@ -27,8 +28,33 @@ ctp.h                     ← 用户只需 #include 这一个
  ├── ctp_timer.h / .c     软件定时器 (Start / Stop / Expired)
  ├── ctp_channel.h / .c   寻址 & DLC 转换
  ├── ctp_conn.h / .c      连接池 & 生命周期 (Create / Release / Find)
- └── ctp_fsm.h / .c       主状态机 (StartTransmit / FeedFrame / TxConfirm / MainFunction)
+ ├── ctp_fsm.h / .c       主状态机 (StartTransmit / FeedFrame / TxConfirm / MainFunction)
+ ├── ctp_os.h / .c        OS 抽象层（内核线程 & 同步 API）
+ └── ctp_os_port_freertos.c  FreeRTOS 移植（裸机编译需排除）
 ```
+
+---
+
+## 运行模式
+
+EasyCantp 支持两种运行模式：
+
+| 模式 | 入口 API | MainFunction 驱动 | 编译要求 |
+|------|----------|------------------|----------|
+| **裸机** | `Cus_Cantp_CreateTxConn` / `StartTransmit` 等 | 用户主轮询 | 排除 `ctp_os.c` 和 `ctp_os_port_freertos.c` |
+| **RTOS** | `Cus_Cantp_OS_CreateTxConn` / `OS_StartTransmit` 等 | 内部Kernel线程自动驱动 | 包含 OS 层，启动 `Cus_CANTP_OS_Init()` |
+
+**裸机模式**下所有协议栈 API 可直接调用，临界区使用 `__disable_irq()` / `__enable_irq()` 保护 MainFunction 与 ISR 的共享数据。
+
+**RTOS 模式**下所有任务的协议栈相关操作经 mailbox 投递给唯一的内核线程进行处理，多任务安全由 具体RTOS 队列保证，MainFunction 与 CAN ISR 之间通过临界区进行访存保护。
+
+> **RTOS 时序提示**：内核线程内部通过 `Cus_Cantp_OS_MailboxFetch` 轮询 mailbox（参数按 **tick** 解释，非毫秒），MainFunction 的驱动周期 = 轮询 tick 数 / `configTICK_RATE_HZ`。调高 `configTICK_RATE_HZ`（如 1000 → 4000）可压缩多帧传输的 CF 帧间隔（从 ~1ms 到 ~250μs）。用户侧 API（`MailboxSend` 等）的毫秒超时语义不受影响。也就是说，若需更快的通讯时序，可通过改变所用 RTOS 的 Tick 频率基准来达到目的(OS环境下)。
+
+> **注意事项**：
+>
+> 1.裸机编译时务必将 ctp_os.h 中的 \#if (0) 保持关闭状态，且不能链接 `ctp_os_port_freertos.c` ！！！若错误链接将导致 FreeRTOS 的临界区强定义覆盖掉裸机的临界区操作，而 FreeRTOS 在启动调度器之前 `uxCriticalNesting` 被初始化为哨兵值 `0xaaaaaaaa`，会导致在未启动调度器的裸机环境下 `taskEXIT_CRITICAL` 永远无法清零 BASEPRI，所有优先级 ≥ `configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY` 的中断被永久静默屏蔽，从而造成协议栈运行异常。 
+>
+> 2.RTOS模式下，调度器启动之前不允许使用任何 Cus_Cantp_OS_xxx 相关操作API（除了 OS_Init）. 若如此操作，在某些情况下会导致协议栈运行异常。
 
 ---
 
@@ -139,6 +165,35 @@ if (rc == 1) {
 }
 ```
 
+### 7. RTOS 模式（可选）
+
+此处以 FreeRTOS 为例，将 `ctp_os.c` 和 `ctp_os_port_freertos.c` 加入工程，调度器启用后，在任务中使用的 API 改为带 `OS_` 前缀的版本：
+
+```c
+#include "ctp_os.h"   /* 替換裸机的 ctp.h */
+
+void main(void) {
+    /* 硬件初始化 + 连接池 + 定时器（同裸机） */
+    Cus_Cantp_ConnPoolInit();
+    Cus_Cantp_TimerInit();
+
+    /* 启动 OS 层 — 创建 mailbox + 内核线程 */
+    Cus_CANTP_OS_Init();
+    ....
+}
+
+/* 调度器启动后，由任务调用 OS-safe API */
+void MyTask(void *arg) {
+    Cus_Cantp_OS_CreateTxConn(chTx, (void *)CAN1, NULL, sendFn, errFn,
+                               5000, &tx);                          /* 同步阻塞 */
+    Cus_Cantp_OS_StartTransmit((Cus_CANTP_TxConn_t *)tx, data, len,
+                               5000);                                /* 异步投递 */
+    vTaskSuspend(NULL);
+}
+```
+
+所有 `Cus_Cantp_OS_*` API 经 mailbox 串行化到唯一的内核线程，多任务并发安全。
+
 ---
 
 ## API 参考
@@ -222,9 +277,26 @@ if (rc == 1) {
 
 ---
 
+## 错误码
+
+| 枚举 | 值 | 含义 |
+|------|----|------|
+| `CUS_CANTP_ERR_NONE` | 0 | 无错误 |
+| `CUS_CANTP_ERR_NBS_TIMEOUT` | 1 | 发送方等待 Flow Control 超时 |
+| `CUS_CANTP_ERR_NCR_TIMEOUT` | 2 | 接收方等待 Consecutive Frame 超时 |
+| `CUS_CANTP_ERR_NAS_TIMEOUT` | 3 | TX mailbox 发送确认超时 |
+| `CUS_CANTP_ERR_FLOW_OVFLW` | 4 | 收到 Flow Control OVERFLOW |
+| `CUS_CANTP_ERR_SN_MISMATCH` | 5 | 连续帧 Sequence Number 不匹配 |
+| `CUS_CANTP_ERR_TX_FAILED` | 6 | 硬件发送失败 |
+| `CUS_CANTP_ERR_RX_BUFFER_FULL` | 7 | 接收缓冲区不足 |
+
+---
+
 ## Benchmark
 
-​	example示例：f1_loopback_demo 测试用例运行示意：
+### 裸机模式性能
+
+​	example示例：`stm32f1_loopback_demo` 测试用例运行示意：
 
  <img src="./image/pic1.png" style="zoom:80%;" />
 
@@ -240,11 +312,55 @@ if (rc == 1) {
 
 <img src="./image/pic5.png" style="zoom:80%;" />
 
-
-
 在 500kbps 经典 CAN 总线上，完成 4095 字节多帧传输的实测耗时：NORMAL 寻址模式（有效载荷 7 字节/帧）为 155.55ms（587 帧），EXT 寻址模式（有效载荷 6 字节/帧）为 180.00ms（684 帧）。理论无填充极限分别为 126.6ms 和 147.7ms，实测差值主要来自 CAN 协议固有的位填充开销（随机数据下约 22%）及帧间隔（IFS），折算后两种模式的有效吞吐量分别为 26.3KB/s 和 22.8KB/s，总线利用率均稳定在 82% 左右。
 
-实测数据表明协议栈本身未引入显著软件开销，性能接近 CAN 物理层极限。
+实测数据表明裸机环境下，协议栈本身未引入显著软件开销，性能接近 CAN 物理层极限。
+
+### RTOS 模式性能（内核线程驱动）
+
+`stm32f1_rtos_demo.c` 运行示意：
+
+<img src="./image/pic6.png" style="zoom:67%;" />
+
+`configTICK_RATE_HZ`为 3000Hz 时，整包1024字节数据（不含FF）发送耗时:
+
+<img src="./image/pic10.png" style="zoom: 80%;" />
+
+`configTICK_RATE_HZ`为 3500Hz 时，整包1024字节数据（不含FF）发送耗时:
+
+<img src="./image/pic9.png" style="zoom:80%;" />
+
+RTOS 模式下多帧传输的帧间隔受内核线程驱动周期（tick）影响，实测（1024 字节，NORMAL 寻址，500kbps，帧起始到帧起始）：
+
+| `configTICK_RATE_HZ` | tick 周期 | 实测帧间隔 | 备注 |
+|----------------------|-----------|-----------|------|
+| 2000 | 500μs | ~500μs | 间隔 = 1 tick |
+| 3000 | 333μs | ~298μs | 整包 48.8879ms（146 帧 不考虑FF.） |
+| 3500 | 286μs | ~292μs | 整包 46.802ms (同样不考虑FF) ，接近物理极限 |
+| 4000 | 250μs | ~500μs | 帧发送时间 ≈ tick 周期，触发 2 tick 相位锁定 |
+
+CF 推进依赖内核线程周期性调用 MainFunction，间隔被 tick 节拍主导。
+
+以 RTOS Tick 频率为 3500Hz 为例进行性能计算。标准帧 8 字节位结构：SOF(1) + 仲裁(12) + 控制(6) + 数据(64) + CRC(16) + ACK(2) + EOF(7) = 108 位。
+
+| 层级 | 位/时间 @500kbps | 累计 |
+|------|-----------------|------|
+| 基础帧（无填充） | 108 位 / 216μs | 216μs |
+| 位填充（随机数据 ~20%，范围 SOF~CRC 共 98 位） | ~20 位 / +40μs | ~256μs |
+| IFS（3 位） | +6μs | **~262μs 物理极限帧间隔** |
+
+3500Hz 实测帧间隔约为292μs左右 → 调度开销仅 **~30μs/帧（~10%）**。
+
+1024 字节整包（3500Hz，146 帧 CF）：
+
+```
+实测整包：46.802ms
+有效吞吐量：1024B / 46.802ms ≈ 21.9 KB/s
+总线占用：146 帧 × ~262μs ≈ 38.25ms
+总线利用率：38.25ms / 46.802ms ≈ 81.72%
+```
+
+**RTOS 内核线程驱动未引入额外损耗**：将 `configTICK_RATE_HZ` 从默认 1000 提升至 3500 后，帧间隔压缩至 ~292μs，调度开销仅 ~30μs/帧，总线利用率 82% 与裸机模式一致。**该结论的前提是通过调整 RTOS tick 频率消除了驱动周期瓶颈**——若保持默认 1ms tick，帧间隔会被节拍锁死在 ~1ms；内核线程驱动本身并不额外耗时，但驱动节奏必须跟上物理层。
 
 ------
 

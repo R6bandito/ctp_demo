@@ -125,7 +125,11 @@
 	extern int8_t Cus_Cantp_OS_ThreadNew( Cus_CANTP_Thread_t pThread, void *pArg, uint32_t stackSize, uint32_t priority );
 	extern int8_t Cus_Cantp_OS_MailboxCreate( uint32_t itemCount, uint32_t itemSize, void **pBox );
 	extern int8_t Cus_Cantp_OS_MailboxSend( void *mailBox, const void *item, uint32_t timeoutMs );
-	extern int8_t Cus_Cantp_OS_MailboxFetch( void *mailBox, void *item, uint32_t timeoutMs );
+
+	/* Internal use only: timeout interpreted in ticks (not ms); the
+	 * MainFunction driving period scales with configTICK_RATE_HZ. */
+	extern int8_t Cus_Cantp_OS_MailboxFetch( void *mailBox, void *item, uint32_t timeoutTicks );
+	
 	extern void Cus_Cantp_OS_Delay( uint32_t delayMs );
 	extern void Cus_Cantp_OS_EnterCritical( void );
 	extern void Cus_Cantp_OS_ExitCritical( void );
